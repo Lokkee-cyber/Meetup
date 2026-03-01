@@ -217,22 +217,29 @@ const Pay = () => {
         }
 
         if (!result.ok) {
+          const normalizedText = textBody.trim();
           const isLikelyProxyBackendDown =
             result.status === 500 &&
             !data?.message &&
-            !textBody.trim();
+            !normalizedText;
           const isExternalRouterError = textBody.includes('ROUTER_EXTERNAL_TARGET_ERROR');
+          const isUpstreamUnavailable = [502, 503, 504].includes(result.status);
+          const safeServerMessage =
+            normalizedText && !normalizedText.startsWith('<!DOCTYPE html') ? normalizedText : '';
 
           setStatusOpen(false);
           setError(
             (isExternalRouterError
               ? 'The app could not reach the backend service. Please try again in 30-60 seconds.'
               : '') ||
+            (isUpstreamUnavailable
+              ? 'Backend service is temporarily unavailable. Please wait a moment and try again.'
+              : '') ||
             (isLikelyProxyBackendDown
               ? 'Payment API is unreachable. Start the backend server (npm run server) and try again.'
               : '') ||
             data?.message ||
-            textBody ||
+            safeServerMessage ||
             `Failed to submit order (HTTP ${result.status}). Please try again.`
           );
           return;
