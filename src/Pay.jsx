@@ -26,6 +26,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 const BTC_ADDRESS = 'bc1qgxp7rx9793c4660j4t4se8djup6uyjjl9tv456d';
 const CASHAPP_ACCOUNT = '$meetup123';
 const PAYPAL_ACCOUNT = 'meetup@paypal.com';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
 const methodConfig = {
   bitcoin: {
@@ -196,7 +197,7 @@ const Pay = () => {
         }
 
         // Send to backend
-        const result = await fetch('/api/send-order', {
+        const result = await fetch(`${API_BASE_URL}/api/send-order`, {
           method: 'POST',
           body: formData
         });
@@ -220,9 +221,13 @@ const Pay = () => {
             result.status === 500 &&
             !data?.message &&
             !textBody.trim();
+          const isExternalRouterError = textBody.includes('ROUTER_EXTERNAL_TARGET_ERROR');
 
           setStatusOpen(false);
           setError(
+            (isExternalRouterError
+              ? 'The app could not reach the backend service. Please try again in 30-60 seconds.'
+              : '') ||
             (isLikelyProxyBackendDown
               ? 'Payment API is unreachable. Start the backend server (npm run server) and try again.'
               : '') ||
