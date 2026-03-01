@@ -11,6 +11,11 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const SMTP_USER = process.env.SMTP_USER;
+const SMTP_PASS = process.env.SMTP_PASS;
+const SMTP_SERVICE = process.env.SMTP_SERVICE || 'gmail';
+const SMTP_FROM = process.env.SMTP_FROM || SMTP_USER;
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || SMTP_USER;
 
 // Middleware
 app.use(cors());
@@ -31,10 +36,10 @@ const createTransporter = (allowInvalidTlsOverride = null) => {
   const allowInvalidTls = allowInvalidTlsOverride ?? (process.env.SMTP_ALLOW_INVALID_TLS === 'true' || !isProduction);
 
   return nodemailer.createTransport({
-    service: 'gmail',
+    service: SMTP_SERVICE,
     auth: {
-      user: 'halliehallie169@gmail.com',
-      pass: 'pqfipxzmlhhpxnop' // Replace with App Password from Google Account
+      user: SMTP_USER,
+      pass: SMTP_PASS
     },
     tls: {
       // In local/dev environments, some networks inject custom TLS certs.
@@ -43,12 +48,16 @@ const createTransporter = (allowInvalidTlsOverride = null) => {
   });
 };
 
-// Admin email where order details will be sent
-const ADMIN_EMAIL = 'halliehallie169@gmail.com';
-
 // API Routes
 app.post('/api/send-order', upload.single('screenshot'), async (req, res) => {
   try {
+    if (!SMTP_USER || !SMTP_PASS || !ADMIN_EMAIL) {
+      return res.status(500).json({
+        success: false,
+        message: 'Server email is not configured. Please set SMTP_USER, SMTP_PASS, and ADMIN_EMAIL.'
+      });
+    }
+
     const { 
       customerName, 
       customerEmail, 
@@ -111,7 +120,7 @@ app.post('/api/send-order', upload.single('screenshot'), async (req, res) => {
     let info;
     try {
       info = await transporter.sendMail({
-        from: '"Meetup Booking System" <halliehallie169@gmail.com>',
+        from: `"Meetup Booking System" <${SMTP_FROM}>`,
         to: ADMIN_EMAIL,
         subject: `New Booking - ${companionName} - $${amount} - ${customerName}`,
         text: emailContent,
@@ -128,7 +137,7 @@ app.post('/api/send-order', upload.single('screenshot'), async (req, res) => {
 
       const fallbackTransporter = createTransporter(true);
       info = await fallbackTransporter.sendMail({
-        from: '"Meetup Booking System" <halliehallie169@gmail.com>',
+        from: `"Meetup Booking System" <${SMTP_FROM}>`,
         to: ADMIN_EMAIL,
         subject: `New Booking - ${companionName} - $${amount} - ${customerName}`,
         text: emailContent,
