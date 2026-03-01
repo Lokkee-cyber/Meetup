@@ -1,13 +1,6 @@
 import express from 'express';
-import nodemailer from 'nodemailer';
 import cors from 'cors';
 import multer from 'multer';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import fs from 'fs';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -17,11 +10,9 @@ const ADDITIONAL_ALLOWED_ORIGINS = (process.env.ADDITIONAL_ALLOWED_ORIGINS || 'h
   .map((origin) => origin.trim())
   .filter(Boolean);
 const ALLOWED_ORIGINS = [FRONTEND_ORIGIN, ...ADDITIONAL_ALLOWED_ORIGINS];
-const SMTP_USER = process.env.SMTP_USER;
-const SMTP_PASS = process.env.SMTP_PASS;
-const SMTP_SERVICE = process.env.SMTP_SERVICE || 'gmail';
-const SMTP_FROM = process.env.SMTP_FROM || SMTP_USER;
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL || SMTP_USER;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const RESEND_FROM = process.env.RESEND_FROM;
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL;
 
 const corsOptions = {
   origin: (origin, callback) => {
@@ -47,32 +38,13 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 } // 10MB limit
 });
 
-// Email configuration - Using Gmail SMTP
-// Note: For production, use App Password or a service like SendGrid/AWS SES
-const createTransporter = (allowInvalidTlsOverride = null) => {
-  const isProduction = process.env.NODE_ENV === 'production';
-  const allowInvalidTls = allowInvalidTlsOverride ?? (process.env.SMTP_ALLOW_INVALID_TLS === 'true' || !isProduction);
-
-  return nodemailer.createTransport({
-    service: SMTP_SERVICE,
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASS
-    },
-    tls: {
-      // In local/dev environments, some networks inject custom TLS certs.
-      rejectUnauthorized: !allowInvalidTls
-    }
-  });
-};
-
 // API Routes
 app.post('/api/send-order', upload.single('screenshot'), async (req, res) => {
   try {
-    if (!SMTP_USER || !SMTP_PASS || !ADMIN_EMAIL) {
+    if (!RESEND_API_KEY || !RESEND_FROM || !ADMIN_EMAIL) {
       return res.status(500).json({
         success: false,
-        message: 'Server email is not configured. Please set SMTP_USER, SMTP_PASS, and ADMIN_EMAIL.'
+        message: 'Server email is not configured. Please set RESEND_API_KEY, RESEND_FROM, and ADMIN_EMAIL.'
       });
     }
 
@@ -96,9 +68,6 @@ app.post('/api/send-order', upload.single('screenshot'), async (req, res) => {
       });
     }
 
-    // Create email transporter
-    const transporter = createTransporter();
-
     // Build email content
     const emailContent = `
       New Booking Order Received
@@ -121,7 +90,6 @@ app.post('/api/send-order', upload.single('screenshot'), async (req, res) => {
       Order received at: ${new Date().toLocaleString()}
     `;
 
-    // Prepare email attachments
     const attachments = [];
     
     // Add screenshot if provided
@@ -129,57 +97,42 @@ app.post('/api/send-order', upload.single('screenshot'), async (req, res) => {
       const fileExtension = req.file.mimetype?.split('/')[1] || 'jpg';
       attachments.push({
         filename: `payment-screenshot-${Date.now()}.${fileExtension}`,
-        content: req.file.buffer,
-        contentType: req.file.mimetype
+        content: req.file.buffer.toString('base64')
       });
     }
 
-    // Send email
-    let info;
-    try {
-      info = await transporter.sendMail({
-        from: `"Meetup Booking System" <${SMTP_FROM}>`,
-        to: ADMIN_EMAIL,
+    const emailResponse = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: RESEND_FROM,
+        to: [ADMIN_EMAIL],
         subject: `New Booking - ${companionName} - $${amount} - ${customerName}`,
         text: emailContent,
-        attachments: attachments
-      });
-    } catch (mailError) {
-      const isTlsCertError =
-        mailError?.code === 'ESOCKET' &&
-        String(mailError?.message || '').includes('self-signed certificate');
+        attachments
+      })
+    });
 
-      if (!isTlsCertError) {
-        throw mailError;
-      }
+    const emailResult = await emailResponse.json().catch(() => ({}));
 
-      const fallbackTransporter = createTransporter(true);
-      info = await fallbackTransporter.sendMail({
-        from: `"Meetup Booking System" <${SMTP_FROM}>`,
-        to: ADMIN_EMAIL,
-        subject: `New Booking - ${companionName} - $${amount} - ${customerName}`,
-        text: emailContent,
-        attachments: attachments
-      });
+    if (!emailResponse.ok) {
+      const providerError = emailResult?.message || emailResult?.error || 'Unknown provider error';
+      throw new Error(`Resend API error (${emailResponse.status}): ${providerError}`);
     }
 
-    console.log('Email sent successfully:', info.messageId);
+    console.log('Email sent successfully:', emailResult?.id);
     
     res.json({ 
       success: true, 
       message: 'Order submitted successfully! We will contact you soon.',
-      messageId: info.messageId
+      messageId: emailResult?.id
     });
 
   } catch (error) {
     console.error('Error sending email:', error);
-
-    if (error?.code === 'ESOCKET' && String(error?.message || '').includes('self-signed certificate')) {
-      return res.status(502).json({
-        success: false,
-        message: 'Email delivery failed due to TLS certificate validation.'
-      });
-    }
 
     res.status(500).json({ 
       success: false, 
