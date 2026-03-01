@@ -11,14 +11,32 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'https://meetup-two-phi.vercel.app';
+const ADDITIONAL_ALLOWED_ORIGINS = (process.env.ADDITIONAL_ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const ALLOWED_ORIGINS = [FRONTEND_ORIGIN, ...ADDITIONAL_ALLOWED_ORIGINS];
 const SMTP_USER = process.env.SMTP_USER;
 const SMTP_PASS = process.env.SMTP_PASS;
 const SMTP_SERVICE = process.env.SMTP_SERVICE || 'gmail';
 const SMTP_FROM = process.env.SMTP_FROM || SMTP_USER;
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || SMTP_USER;
 
+const corsOptions = {
+  origin: (origin, callback) => {
+    // Allow non-browser clients (no origin header) and configured origins.
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+      return callback(null, true);
+    }
+    return callback(new Error('Not allowed by CORS'));
+  },
+  methods: ['GET', 'POST', 'OPTIONS'],
+};
+
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
